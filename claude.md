@@ -1,254 +1,159 @@
-# claude.md — S3 Access Control Adapter (Option 2: Capability-Issuing Gateway)
+# claude.md — S3 Access Control Adapter (Gateway Proxy with IAM-like Policy, Secret Key + Password)
 
 ## Purpose
-We are migrating from MinIO (with our own IAM-like access control overlay) to AWS S3.
-We will NOT proxy data through our gateway. Instead, the gateway acts as:
-- **PDP (Policy Decision Point)**: evaluates our custom access-control rules
-- **Capability issuer**: mints short-lived, tightly-scoped access for S3
-Clients then access S3 directly using:
-- **Presigned URLs** (preferred for simple GET/PUT), and/or
-- **STS AssumeRole credentials with session policy** (preferred for multi-op sessions)
+We are migrating from MinIO (with our own IAM-like access control overlay) to AWS S3. 
+The goal is for the client to continue using the same S3-compatible SDK without needing to change the endpoint configuration.
 
-The adapter must preserve our existing semantics as much as possible while leveraging AWS primitives.
+We will implement a **gateway proxy** where:
+- The **gateway** is responsible for authenticating the client, verifying the client’s identity, and enforcing **IAM-like policies** for access control.
+- The **client** will authenticate using **the same S3 IAM policies** (via secret key and password) to access the gateway.
+- The **gateway** will proxy all S3 requests to AWS S3 using AWS credentials that the gateway possesses.
+- **Data** will flow through the gateway, ensuring access control policies are applied and access is logged for auditing purposes.
+
+The client will only need to change the endpoint to the gateway URL, without any changes to their existing S3 access code or authentication process.
 
 ---
 
 ## Non-goals
-- Do not implement custom authorization inside S3 (not possible).
-- Do not build a full reverse proxy for S3 data plane.
-- Do not rely on long-lived credentials on clients.
+- We will **not** use STS or session-based credentials.
+- The client will use the **same IAM-like policy** for authentication that they already use with AWS S3.
+- The goal is for the client to be unaware of the underlying changes, with only the endpoint needing to be updated.
 
 ---
 
 ## High-level Architecture
 ### Control plane flow
-1. Client calls **Access Gateway** with:
-   - user identity (JWT/OIDC), tenant/project context, intended operation(s), object key(s)
-2. Gateway authenticates and authorizes via our internal policy engine
-3. If allowed, Gateway issues **capability**:
-   - Presigned URL(s) OR STS session credentials
-4. Client uses capability to access S3 directly
-5. Gateway logs decision + capability issuance for auditing
+1. **Client** uses their existing **secret key and password** for authentication, just as they do with AWS S3.
+2. The **gateway** verifies the client identity using **IAM-like policies** (like AWS IAM roles and policies).
+3. If authorized, the **Gateway** proxies the request to AWS S3 using the gateway’s AWS credentials.
+4. The **Gateway** logs the access, including all policy decisions, for auditing purposes.
 
 ### Data plane flow
-- Client -> S3 directly (no gateway in the data path)
+- **Data** flows directly through the **Gateway** to AWS S3 (client continues to use the SDK or tools without endpoint changes in their code).
 
 ---
 
 ## Key Concepts & Mapping
-### Our access-control model
-We define:
-- Subject: user/service identity
-- Context: tenant/project/workspace
-- Resource: bucket + object key (and optionally tags/metadata)
-- Action: list/get/put/delete/head/multipart/restore
-- Conditions: time, IP/network, attributes, quotas, workflows, etc.
+### IAM-like access control policies
+We define access control using **IAM-like policies**:
+- **Actions**: Permissions to perform operations on S3 (e.g., `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`, `s3:DeleteObject`).
+- **Resources**: The specific S3 buckets and object keys.
+- **Conditions**: Optional conditions like IP range, time-based access, or specific metadata.
+- **Principals**: The client or service identity, which is authenticated via secret key + password (same as AWS S3).
 
 ### Mapping to AWS
-We enforce using a combination of:
-1. **STS AssumeRole + Session Policy** (stronger, multi-operation)
-2. **Presigned URLs** (simple, easy, tight TTL)
-3. Bucket policies are guardrails only (deny-by-default, allow via roles, enforce encryption, block public, etc.)
+We enforce using the following:
+1. **IAM-like policies** that map directly to AWS S3 permissions and conditions.
+2. **Gateway** authenticates the client, checks the IAM-like policy, and then proxies the request to AWS S3.
+3. **Base guardrails**: Use **Bucket Policies** and **IAM roles** on AWS to enforce basic access control rules.
 
 ---
 
-## Choosing Capability Type
-### Use Presigned URL when:
-- Single operation (GET or PUT) on a specific object key
-- Short TTL acceptable (e.g., 1–10 minutes)
-- Client is browser/mobile and we want simplest integration
-
-### Use STS AssumeRole when:
-- The client needs multiple operations (list + get, multipart upload, delete)
-- SDK integration expects AWS credentials
-- We need richer constraints (prefix scope, actions set) via session policy
-
-Hybrid is allowed:
-- For uploads: issue multipart-related STS creds
-- For downloads: presign GET
+## IAM-like Policy Enforcement
+### Policy Components
+1. **Actions**: Define the operations allowed on S3 resources.
+2. **Resources**: Define which S3 resources (buckets, object keys) the client can interact with.
+3. **Conditions**: (Optional) Limit the action to specific conditions like IP range or time window.
+4. **Principals**: Clients are identified by their secret key and password, and are associated with IAM-like roles that grant them permissions.
 
 ---
 
 ## Security Requirements (Must)
-1. **Default deny**: gateway must deny unless explicitly allowed by policy engine.
-2. **Least privilege**: capabilities must be scoped to:
-   - exact bucket(s)
-   - key prefix or exact key(s)
-   - minimal actions
-   - short TTL
-3. **Short TTL**:
-   - Presigned URLs: 60s–10m (prefer <= 5m)
-   - STS credentials: 15m–60m (prefer <= 30m)
-4. **Guardrails** in S3:
-   - Block Public Access enabled
-   - Bucket policy enforces TLS (`aws:SecureTransport`)
-   - Require encryption-at-rest (SSE-S3 or SSE-KMS)
-   - Optional: deny non-approved principals
-5. **No long-lived secrets** on clients.
-6. **Audit logs**:
-   - Log every decision (allow/deny) with request context
-   - Log every capability issuance with a correlation id
-   - Include: subject, tenant, resource, action, TTL, reason, policy version, request id
-7. **Replay & leakage mitigation**:
-   - Keep TTL short
-   - Prefer exact-key presign (not broad prefix)
-   - For sensitive ops, consider “download token” indirection (client fetches presign per download)
+1. **Seamless Experience**: The client will continue to authenticate using their **existing AWS IAM-like policy** (via secret key and password), ensuring **no change in behavior** for the client. The only change will be the endpoint to the gateway.
+2. **Default Deny**: The gateway must ensure that no request is allowed unless explicitly granted by IAM-like policy.
+3. **Minimal Access**: Access to S3 resources must be limited strictly to the client's designated scope (e.g., tenant, project).
+4. **End-to-End Encryption**: All data in transit will be encrypted using TLS. Data stored on S3 will be encrypted (either SSE-S3 or SSE-KMS).
+5. **Strong Authentication**: Clients authenticate using **the same IAM-like credentials** they use with AWS S3 (via secret key and password). This authentication method is seamless and does not require any changes to the client’s code.
+6. **Audit and Monitoring**: The gateway will log every request, including the client identity, resource accessed, action taken, and the decision (allow/deny). Logs will be stored securely for auditing purposes.
+7. **Replay & Leakage Prevention**: Enforce short TTLs for presigned URLs if used. The gateway will validate every request to ensure that the client is authorized to access the requested resource, based on the IAM-like policies.
 
 ---
 
-## Important Limitations (Acknowledge)
-- Presigned URLs and STS creds cannot be instantly revoked; revocation is bounded by TTL.
-- Fine-grained per-request checks after issuance are not possible without proxying.
-- Avoid issuing overly broad list permissions; list semantics can leak object names.
+## Key API Design (Gateway)
+Since the client is using **the same IAM-like policies** for authentication (just as they do with AWS S3), there are no new endpoints for authentication. The gateway will simply proxy requests and enforce the same access policies that are already in place with AWS S3.
 
-Mitigation strategy:
-- Keep TTL short
-- Consider per-object issuance
-- Use prefix partitioning (`tenantId/projectId/...`) and only ever grant within that partition
+### Authentication
+- The **client** authenticates using **secret key + password**, just as they would with AWS S3.
+- The **gateway** verifies the client’s identity by matching the IAM policies associated with the secret key.
+- **IAM policies** are enforced by the gateway, ensuring that only authorized requests are forwarded to AWS S3.
 
----
+### Data Proxying
+- The **gateway** handles all **S3 requests** on behalf of the client.
+- For `PUT` or `GET` actions, the gateway:
+  - Verifies the client’s IAM-like policy.
+  - Forwards the request to AWS S3 (using the gateway’s AWS credentials).
+  - Returns the response back to the client.
 
-## API Design (Gateway)
-### Endpoints (suggested)
-1. `POST /v1/capabilities/presign`
-   - Input: `{ action: "GET"|"PUT", bucket, key, contentType?, contentLength?, checksum?, ttlSeconds? }`
-   - Output: `{ url, headers?, expiresAt, requestId }`
-
-2. `POST /v1/capabilities/sts`
-   - Input: `{ actions: ["s3:GetObject",...], bucket, prefixOrKeys, ttlSeconds?, sessionName? }`
-   - Output: `{ accessKeyId, secretAccessKey, sessionToken, expiresAt, region, requestId }`
-
-3. `POST /v1/authorize` (optional, for “check only”)
-   - Input: `{ subject, action, resource, context }`
-   - Output: `{ decision: "allow"|"deny", reason, policyVersion }`
-
-### AuthN/AuthZ
-- Gateway verifies JWT/OIDC and maps to internal subject.
-- Authorization is done by our policy engine (PDP).
-- Gateway never accepts “bucket/key” without validating tenant boundary rules.
+### Bucket Policy Guardrails
+- Use **AWS Bucket Policies** for baseline access control (e.g., block public access, enforce encryption).
+- The gateway can enforce additional IAM-like policies beyond what AWS’s native IAM policies provide.
 
 ---
 
-## S3 Key Layout (Strong Recommendation)
-Enforce deterministic partitioning:
-- `s3://<bucket>/<tenantId>/<projectId>/<resourceType>/<objectId>`
+## Security & Privacy
+1. **Data Encryption**: All data in transit will be encrypted using TLS, and data stored on S3 will be encrypted (SSE-S3 or SSE-KMS).
+2. **Access Control**:
+   - Ensure clients can only access resources within their tenant/project scope.
+   - Deny access by default unless explicitly granted by IAM-like policy.
+3. **Logging & Auditing**: Log all requests for full visibility of who accessed what data and when.
 
-Never grant access outside the caller’s tenant prefix.
-
----
-
-## IAM & STS Implementation Details
-### Roles
-- One or more “access roles” per environment/bucket.
-- Gateway assumes a role that can assume downstream roles if needed.
-
-### Session policy (generated per request)
-- Must include:
-  - `Action`: minimal set
-  - `Resource`: `arn:aws:s3:::bucket/prefix*` or explicit keys
-- Prefer explicit keys where possible; otherwise prefix with tight partition boundary.
-
-### Optional constraints
-- If using SSE-KMS, include KMS permissions and enforce encryption headers.
-
----
-
-## Presign Implementation Details
-- Presign with SigV4, include:
-  - Method: GET/PUT
-  - Bucket + Key
-  - Expiration
-- For PUT, optionally require:
-  - `Content-Type`
-  - `x-amz-server-side-encryption`
-  - `x-amz-checksum-*` / `Content-MD5`
-- Reject requests that try to presign a key outside allowed prefix.
+### Boundary & Permissions
+- For every request, the gateway will verify that the resource is within the client’s allowed tenant/project prefix.
+- The client will never have the ability to access resources outside their assigned boundary.
 
 ---
 
 ## Auditing & Observability
-### Correlation
-- Every request has `requestId` (UUID).
-- Propagate into logs and returned payload.
-- Include upstream trace ids if available.
+- **Access Logs**: Log all access requests (successful and failed) with:
+  - **clientId** (user identity or service)
+  - **resource** (bucket + object)
+  - **action** (list, get, put, etc.)
+  - **decision** (allow/deny)
+  - **timestamp** and **requestId**
 
-### Events
-Emit structured events:
-- `authz_decision`
-- `capability_issued`
-- `capability_denied`
-- `capability_error`
-
-### Recommended fields
-- subjectId, tenantId, projectId
-- action(s)
-- bucket, key/prefix
-- ttlSeconds, expiresAt
-- decision, denyReason
-- policyVersion, policyHash
-- clientIp, userAgent (if available)
-- awsRequestId (if available)
+- **Logging**: Ensure access to sensitive resources is logged.
+  - Logs should be stored securely and centrally for audit and forensic analysis.
 
 ---
 
 ## Error Handling
 - Deny by default with clear reason codes:
-  - `DENY_TENANT_BOUNDARY`
-  - `DENY_POLICY`
-  - `DENY_INVALID_RESOURCE`
-  - `DENY_UNSUPPORTED_ACTION`
-- Avoid leaking sensitive info in error messages to clients.
-- Log full diagnostic detail server-side.
+  - `DENY_TENANT_BOUNDARY`: The requested resource is outside the client’s assigned tenant/project.
+  - `DENY_POLICY`: The requested action is not permitted based on IAM-like policy.
+  - `DENY_INVALID_RESOURCE`: The requested object or key does not exist or is invalid.
+
+- Avoid revealing sensitive information in error messages (e.g., not exposing whether a key exists or not).
 
 ---
 
 ## Testing Requirements
-### Unit tests
-- Policy decision mapping -> session policy generation
-- Boundary checks: cannot escape prefix via path tricks (`..`, URL encoding)
-- TTL enforcement
-- For presign: required headers are enforced in presigned signature
+### Unit Tests
+- Ensure the gateway properly verifies the IAM-like policy and forwards requests to S3 only if allowed.
+- Test for proper logging of access decisions (success/failure).
+- Verify that the gateway correctly handles the secret key and password authentication.
+- Mock AWS S3 for integration tests to verify requests are being forwarded properly.
 
-### Integration tests (can be mocked if needed)
-- STS assume role + S3 access with issued creds works
-- Presigned PUT then GET works within allowed scope
-- Denied scope cannot access
+### Integration Tests
+- Test the full request flow: client -> gateway -> S3, ensuring that only authorized clients can access their resources.
+- Verify that the client can change the endpoint without needing to modify any code.
 
-### Security tests
-- Attempt key traversal / encoding bypass
-- Attempt wildcard broadening
-- Attempt list leakage outside prefix
+### Security Tests
+- Test unauthorized access attempts to ensure the gateway denies requests outside the client’s boundaries.
+- Test encryption and transport security to ensure data is not leaked in transit.
 
 ---
 
-## Implementation Guidelines for Claude
-When generating code:
-1. Keep modules small and testable:
-   - `authn/` (JWT validation)
-   - `authz/` (policy engine adapter)
-   - `capabilities/` (presign + sts)
-   - `aws/` (S3/STS clients)
-   - `audit/` (structured logging/events)
-2. Centralize “tenant boundary validation” in one place and reuse everywhere.
-3. Avoid embedding AWS credentials in config; use workload identity (IRSA) or instance profile.
-4. Use typed DTOs for inputs/outputs; validate all inputs strictly.
-5. Ensure no sensitive tokens are logged.
-
----
-
-## Open Questions (Default Answers)
-If the repo doesn’t specify:
-- TTL defaults: presign 300s, sts 1800s
-- Encryption: enforce SSE-S3 or SSE-KMS (prefer SSE-KMS if compliance requires)
-- List: disallow by default unless explicitly needed and constrained to prefix
-- Delete: disallow by default unless explicitly required
+## Local Development Setup
+- **Set up a local environment** where the **gateway** can be tested with AWS S3 emulation (e.g., using a localstack or similar tool).
+- Ensure the **gateway** is capable of handling both the authentication and proxying of requests to S3 with IAM-like policies enforced.
 
 ---
 
 ## Deliverables Expected From Claude
-- Gateway API handlers for presign and STS
-- Policy compilation logic (internal decision -> AWS constraints)
-- Robust validation + audit logging
-- Unit tests and boundary/security tests
-- Example bucket policy guardrails (as IaC snippets) if requested
+- Gateway API handlers for authentication, presign, and authorization
+- IAM-like policy enforcement logic in the gateway
+- AWS S3 proxy integration (data flows through the gateway to S3)
+- Full audit logging system for access control decisions
+- Unit tests and boundary/security tests to validate the entire flow
+- Local development environment setup for testing
 
