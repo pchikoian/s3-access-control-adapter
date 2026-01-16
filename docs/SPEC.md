@@ -1,11 +1,11 @@
-# claude.md — S3 Access Control Adapter (Gateway Proxy with IAM-like Policy, Secret Key + Password)
+# S3 Access Control Adapter (Gateway Proxy with IAM-like Policy, Secret Key + Password)
 
 ## Purpose
-We are migrating from MinIO (with our own IAM-like access control overlay) to AWS S3. 
+We are migrating from MinIO (with our own IAM-like access control overlay) to AWS S3.
 The goal is for the client to continue using the same S3-compatible SDK without needing to change the endpoint configuration.
 
 We will implement a **gateway proxy** where:
-- The **gateway** is responsible for authenticating the client, verifying the client’s identity, and enforcing **IAM-like policies** for access control.
+- The **gateway** is responsible for authenticating the client, verifying the client's identity, and enforcing **IAM-like policies** for access control.
 - The **client** will authenticate using **the same S3 IAM policies** (via secret key and password) to access the gateway.
 - The **gateway** will proxy all S3 requests to AWS S3 using AWS credentials that the gateway possesses.
 - **Data** will flow through the gateway, ensuring access control policies are applied and access is logged for auditing purposes.
@@ -25,7 +25,7 @@ The client will only need to change the endpoint to the gateway URL, without any
 ### Control plane flow
 1. **Client** uses their existing **secret key and password** for authentication, just as they do with AWS S3.
 2. The **gateway** verifies the client identity using **IAM-like policies** (like AWS IAM roles and policies).
-3. If authorized, the **Gateway** proxies the request to AWS S3 using the gateway’s AWS credentials.
+3. If authorized, the **Gateway** proxies the request to AWS S3 using the gateway's AWS credentials.
 4. The **Gateway** logs the access, including all policy decisions, for auditing purposes.
 
 ### Data plane flow
@@ -63,7 +63,7 @@ We enforce using the following:
 2. **Default Deny**: The gateway must ensure that no request is allowed unless explicitly granted by IAM-like policy.
 3. **Minimal Access**: Access to S3 resources must be limited strictly to the client's designated scope (e.g., tenant, project).
 4. **End-to-End Encryption**: All data in transit will be encrypted using TLS. Data stored on S3 will be encrypted (either SSE-S3 or SSE-KMS).
-5. **Strong Authentication**: Clients authenticate using **the same IAM-like credentials** they use with AWS S3 (via secret key and password). This authentication method is seamless and does not require any changes to the client’s code.
+5. **Strong Authentication**: Clients authenticate using **the same IAM-like credentials** they use with AWS S3 (via secret key and password). This authentication method is seamless and does not require any changes to the client's code.
 6. **Audit and Monitoring**: The gateway will log every request, including the client identity, resource accessed, action taken, and the decision (allow/deny). Logs will be stored securely for auditing purposes.
 7. **Replay & Leakage Prevention**: Enforce short TTLs for presigned URLs if used. The gateway will validate every request to ensure that the client is authorized to access the requested resource, based on the IAM-like policies.
 
@@ -74,19 +74,19 @@ Since the client is using **the same IAM-like policies** for authentication (jus
 
 ### Authentication
 - The **client** authenticates using **secret key + password**, just as they would with AWS S3.
-- The **gateway** verifies the client’s identity by matching the IAM policies associated with the secret key.
+- The **gateway** verifies the client's identity by matching the IAM policies associated with the secret key.
 - **IAM policies** are enforced by the gateway, ensuring that only authorized requests are forwarded to AWS S3.
 
 ### Data Proxying
 - The **gateway** handles all **S3 requests** on behalf of the client.
 - For `PUT` or `GET` actions, the gateway:
-  - Verifies the client’s IAM-like policy.
-  - Forwards the request to AWS S3 (using the gateway’s AWS credentials).
+  - Verifies the client's IAM-like policy.
+  - Forwards the request to AWS S3 (using the gateway's AWS credentials).
   - Returns the response back to the client.
 
 ### Bucket Policy Guardrails
 - Use **AWS Bucket Policies** for baseline access control (e.g., block public access, enforce encryption).
-- The gateway can enforce additional IAM-like policies beyond what AWS’s native IAM policies provide.
+- The gateway can enforce additional IAM-like policies beyond what AWS's native IAM policies provide.
 
 ---
 
@@ -98,7 +98,7 @@ Since the client is using **the same IAM-like policies** for authentication (jus
 3. **Logging & Auditing**: Log all requests for full visibility of who accessed what data and when.
 
 ### Boundary & Permissions
-- For every request, the gateway will verify that the resource is within the client’s allowed tenant/project prefix.
+- For every request, the gateway will verify that the resource is within the client's allowed tenant/project prefix.
 - The client will never have the ability to access resources outside their assigned boundary.
 
 ---
@@ -118,7 +118,7 @@ Since the client is using **the same IAM-like policies** for authentication (jus
 
 ## Error Handling
 - Deny by default with clear reason codes:
-  - `DENY_TENANT_BOUNDARY`: The requested resource is outside the client’s assigned tenant/project.
+  - `DENY_TENANT_BOUNDARY`: The requested resource is outside the client's assigned tenant/project.
   - `DENY_POLICY`: The requested action is not permitted based on IAM-like policy.
   - `DENY_INVALID_RESOURCE`: The requested object or key does not exist or is invalid.
 
@@ -138,7 +138,7 @@ Since the client is using **the same IAM-like policies** for authentication (jus
 - Verify that the client can change the endpoint without needing to modify any code.
 
 ### Security Tests
-- Test unauthorized access attempts to ensure the gateway denies requests outside the client’s boundaries.
+- Test unauthorized access attempts to ensure the gateway denies requests outside the client's boundaries.
 - Test encryption and transport security to ensure data is not leaked in transit.
 
 ---
@@ -156,4 +156,3 @@ Since the client is using **the same IAM-like policies** for authentication (jus
 - Full audit logging system for access control decisions
 - Unit tests and boundary/security tests to validate the entire flow
 - Local development environment setup for testing
-

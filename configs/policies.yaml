@@ -1,0 +1,52 @@
+# IAM-like policies for access control
+policies:
+  # Tenant 001 full access policy
+  - name: tenant-001-full-access
+    version: "2012-10-17"
+    statements:
+      - sid: AllowFullAccess
+        effect: Allow
+        actions:
+          - s3:GetObject
+          - s3:PutObject
+          - s3:DeleteObject
+          - s3:ListBucket
+        resources:
+          - arn:aws:s3:::tenant-001-*
+          - arn:aws:s3:::tenant-001-*/*
+
+  # Tenant 001 read-only policy
+  - name: tenant-001-readonly
+    version: "2012-10-17"
+    statements:
+      - sid: AllowReadOnly
+        effect: Allow
+        actions:
+          - s3:GetObject
+          - s3:ListBucket
+        resources:
+          - arn:aws:s3:::tenant-001-*
+          - arn:aws:s3:::tenant-001-*/*
+      - sid: DenyWrite
+        effect: Deny
+        actions:
+          - s3:PutObject
+          - s3:DeleteObject
+        resources:
+          - arn:aws:s3:::*
+          - arn:aws:s3:::*/*
+
+  # Tenant 002 full access policy
+  - name: tenant-002-full-access
+    version: "2012-10-17"
+    statements:
+      - sid: AllowFullAccess
+        effect: Allow
+        actions:
+          - s3:GetObject
+          - s3:PutObject
+          - s3:DeleteObject
+          - s3:ListBucket
+        resources:
+          - arn:aws:s3:::tenant-002-*
+          - arn:aws:s3:::tenant-002-*/*
