@@ -11,13 +11,13 @@ import (
 
 // S3Request represents a parsed S3 request
 type S3Request struct {
-	Bucket      string
-	Key         string
-	Action      string
-	HTTPMethod  string
-	Headers     http.Header
-	Body        io.ReadCloser
-	QueryParams url.Values
+	Bucket        string
+	Key           string
+	Action        string
+	HTTPMethod    string
+	Headers       http.Header
+	Body          io.ReadCloser
+	QueryParams   url.Values
 	ContentLength int64
 }
 

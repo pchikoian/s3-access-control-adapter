@@ -104,7 +104,7 @@ func (e *DefaultEngine) Evaluate(ctx *EvalContext, policyNames []string) *Decisi
 		decision := e.evaluatePolicy(ctx, policy)
 
 		// Explicit deny takes immediate precedence
-		if decision != nil && !decision.Allowed && decision.DenyReason != errors.DenyPolicy {
+		if decision != nil && !decision.Allowed {
 			return decision
 		}
 

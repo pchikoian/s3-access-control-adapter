@@ -3,6 +3,14 @@
 BINARY_NAME=gateway
 BUILD_DIR=bin
 
+# Detect docker compose command (v1 vs v2)
+DOCKER_COMPOSE := $(shell which docker-compose 2>/dev/null)
+ifeq ($(DOCKER_COMPOSE),)
+	DOCKER_COMPOSE := docker compose
+else
+	DOCKER_COMPOSE := docker-compose
+endif
+
 build:
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/gateway
 
@@ -21,13 +29,13 @@ clean:
 	rm -f coverage.out coverage.html
 
 docker-up:
-	docker-compose up -d
+	$(DOCKER_COMPOSE) up -d
 
 docker-down:
-	docker-compose down
+	$(DOCKER_COMPOSE) down
 
 docker-build:
-	docker-compose build
+	$(DOCKER_COMPOSE) build
 
 lint:
 	golangci-lint run ./...

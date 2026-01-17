@@ -13,21 +13,21 @@ import (
 
 // Entry represents an audit log entry
 type Entry struct {
-	Timestamp   time.Time `json:"timestamp"`
-	RequestID   string    `json:"requestId"`
-	ClientID    string    `json:"clientId"`
-	TenantID    string    `json:"tenantId"`
-	Action      string    `json:"action"`
-	Resource    string    `json:"resource"`
-	Bucket      string    `json:"bucket"`
-	Key         string    `json:"key,omitempty"`
-	Decision    string    `json:"decision"` // "allow" or "deny"
-	DenyReason  string    `json:"denyReason,omitempty"`
-	SourceIP    string    `json:"sourceIp"`
-	UserAgent   string    `json:"userAgent,omitempty"`
-	DurationMs  int64     `json:"durationMs"`
-	StatusCode  int       `json:"statusCode,omitempty"`
-	ErrorMsg    string    `json:"error,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	RequestID  string    `json:"requestId"`
+	ClientID   string    `json:"clientId"`
+	TenantID   string    `json:"tenantId"`
+	Action     string    `json:"action"`
+	Resource   string    `json:"resource"`
+	Bucket     string    `json:"bucket"`
+	Key        string    `json:"key,omitempty"`
+	Decision   string    `json:"decision"` // "allow" or "deny"
+	DenyReason string    `json:"denyReason,omitempty"`
+	SourceIP   string    `json:"sourceIp"`
+	UserAgent  string    `json:"userAgent,omitempty"`
+	DurationMs int64     `json:"durationMs"`
+	StatusCode int       `json:"statusCode,omitempty"`
+	ErrorMsg   string    `json:"error,omitempty"`
 }
 
 // Logger is the interface for audit logging
